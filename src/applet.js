@@ -518,7 +518,7 @@ var FileProvider = NoteProvider.extend({
 		}
 		
 		// Call super class to do the filename pattern matching
-		result &= arguments.callee.$.passesExcludeFilter.call(queryInfo.get_name());
+		result &= arguments.callee.$.passesExcludeFilter.call(this, queryInfo.get_name());
 		
 		return result;
  	},
