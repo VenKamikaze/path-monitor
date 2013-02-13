@@ -444,7 +444,7 @@ var NoteProvider = Class.extend({
 		debugLog("Got patternList=" + patternList);
 		if(patternList.length > 0)
 		{
-			for(let i = 0; i <= (patternList.split(","); i++)
+			for(let i = 0; i <= (patternList.split(",")); i++)
 			{
 				let pattern = patternList[i];
 				if (! FULL_REGEX)
