@@ -35,7 +35,7 @@
 // Notes: This is my very first applet and in fact, my first GPL released code of any sort.
 //        Go easy on me!
 
-const NAME = 'path-monitor';
+const NAME = 'path-monitor-test';
 const UUID = NAME + '@kamikaze';
 
 const Lang = imports.lang;
@@ -61,12 +61,12 @@ const MAX_LIST_SIZE = 25;
 
 // Allow maximum of 5 instances of path-monitor.
 const MAX_INSTANCES = 5;
-const debug = true;
+const debug = false;
 
 // Put in the list of file patterns, comma separated, you wish to exclude from the file list.
-// e.g. to exclude files starting with 'a' 
-//      and files ending in '~' you'd do: var FILE_EXCLUDE_FILTER = "a*,*~";
-var FILE_EXCLUDE_FILTER = "*~"; // exclude temp files such as gedit copies.
+// e.g. to exclude files starting with 'a' and files ending in '~' 
+//         you'd do: var FILE_EXCLUDE_FILTER = "a*,*~";
+var FILE_EXCLUDE_FILTER = "*~,*DO*"; // exclude temp files such as gedit copies.
 var FULL_REGEX = false;    // to make it simpler for people we use shell style globbing
                            // instead of full Regex support. Basically we just replace
                            // '*' with '.*'
@@ -432,29 +432,42 @@ Class.extend = function(def) {
 //-------------------------------------------------------------------
 // abstract noteProvider.
 var NoteProvider = Class.extend({
-	construct: function() { },
+    patterns: new String(),
+    patternList: [],
+    
+    construct: function() 
+	{
+	    // fix up the pattern filter to be regex compliant for searching
+	    if( ! FULL_REGEX)
+	    {
+	        let patterns = FILE_EXCLUDE_FILTER.replace(new RegExp("\\.", "g"), "\\.");
+	        patterns = patterns.replace(new RegExp("\\*", "g"), ".*");
+	        this.patterns = patterns;
+	    }
+	    else
+	      this.patterns = patterns;
+	    
+	    if (this.patterns.length > 0)
+	      this.patternList = this.patterns.split(",");
+	},
+	
 	type: function() { return "NoteProvider"; },
 	list: function(noteLocation) { throw 'Not implemented!'; },
  	update: function() { throw 'Not implemented!'; },
  	passesExcludeFilter: function (noteName) 
  	{ 
- 		debugLog("in baseclass noteprovider");
 		let matches = false; // if it matches, we exclude it.
-		let patternList = FILE_EXCLUDE_FILTER; 
-		debugLog("Got patternList=" + patternList);
-		if(patternList.length > 0)
+		debugLog("FILE_EXCLUDE_FILTER=" + FILE_EXCLUDE_FILTER);
+		debugLog("patterns=" + this.patterns);
+		if(this.patternList.length > 0)
 		{
-			for(let i = 0; i <= (patternList.split(",")); i++)
+			for(let i = 0; i < this.patternList.length; i++)
 			{
-				let pattern = patternList[i];
-				if (! FULL_REGEX)
-					pattern = patternList[i].replace("*", ".*");
-				
-				debugLog("Got pattern=" + pattern);
+				let pattern = this.patternList[i];
 				matches |= new RegExp(pattern, 'gi').test(noteName); // match on it...
 			}
 		}
-		return (!matches);  // poor function name - if it matches it DOESN'T 
+		return (!matches);  // poor var/func name - if it matches it DOESN'T pass the exclude filter
  	},
  	
  	open: function (note) { throw 'Not implemented!'; }
