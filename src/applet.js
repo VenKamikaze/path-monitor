@@ -438,16 +438,19 @@ var NoteProvider = Class.extend({
  	update: function() { throw 'Not implemented!'; },
  	passesExcludeFilter: function (noteName) 
  	{ 
+ 		debugLog("in baseclass noteprovider");
 		let matches = false; // if it matches, we exclude it.
 		let patternList = FILE_EXCLUDE_FILTER; 
+		debugLog("Got patternList=" + patternList);
 		if(patternList.length > 0)
 		{
-			for(let i = 0; i < patternList.split(","); i++)
+			for(let i = 0; i <= (patternList.split(","); i++)
 			{
 				let pattern = patternList[i];
 				if (! FULL_REGEX)
 					pattern = patternList[i].replace("*", ".*");
 				
+				debugLog("Got pattern=" + pattern);
 				matches |= new RegExp(pattern, 'gi').test(noteName); // match on it...
 			}
 		}
