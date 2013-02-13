@@ -8,8 +8,15 @@
 // emotional hurt suffered or natural disasters that may arise from use
 // of this applet. Use it carefully :)
 //
-// Version 0.5
+// Version 0.55
 // Author: Mick Saunders
+//
+// Changes for 0.55 : * More complete support for file/path pattern exclusions.
+// NOTE: You can change the FILE_EXCLUDE_FILTER variable below to put in a list
+//       of shell style patterns to match files on. Using comma (,) is NOT supported
+//       as we use it to delineate the patterns you want to use to exclude files.
+//       If you know REGEXP then enable the 'FULL_REGEX' flag and you can use them too.
+//
 //
 // Changes for 0.5 : * Hacky support for multiple instances.
 //                   * Begin support for file/path pattern exclusions.
@@ -54,11 +61,15 @@ const MAX_LIST_SIZE = 25;
 
 // Allow maximum of 5 instances of path-monitor.
 const MAX_INSTANCES = 5;
-const debug = false;
+const debug = true;
 
 // Put in the list of file patterns, comma separated, you wish to exclude from the file list.
-// e.g. to exclude files starting with 'a' you'd do: const FILE_EXCLUDE_FILTER = "a*";
-var FILE_EXCLUDE_FILTER = ""; // TODO, this isn't implemented yet.
+// e.g. to exclude files starting with 'a' 
+//      and files ending in '~' you'd do: var FILE_EXCLUDE_FILTER = "a*,*~";
+var FILE_EXCLUDE_FILTER = "*~"; // exclude temp files such as gedit copies.
+var FULL_REGEX = false;    // to make it simpler for people we use shell style globbing
+                           // instead of full Regex support. Basically we just replace
+                           // '*' with '.*'
 
 // Show hidden files, symlinks, directories,
 const SHOW_HIDDEN_FILES = false;
@@ -107,7 +118,7 @@ MyApplet.prototype = {
             this.set_applet_icon_name("folder-saved-search-symbolic");
             this.set_applet_tooltip(_("Click to list your files"));
 
-            this.provider = new fileProvider();
+            this.provider = new FileProvider();
             
             this.menuManager = new PopupMenu.PopupMenuManager(this);
             this.menu = new Applet.AppletPopupMenu(this, orientation);
@@ -391,110 +402,131 @@ function loadGSchemaSettings(schemaId, path) {
 }
 
 //-------------------------------------------------------------------
+// Thanks to Josh Gertzen's article to set up nicer OO inheritance in javascript
+// Credit: http://joshgertzen.com/object-oriented-super-class-method-calling-with-javascript/
 
-// abstract class
-function noteProvider() { }
-
-noteProvider.prototype.type = function () {
-	throw 'Not implemented!';
-};
-
-noteProvider.prototype.list = function (fileLocation) {
-	throw 'Not implemented!';
-};
-
-noteProvider.prototype.update = function () {
-	throw 'Not implemented!';
-};
-
-noteProvider.prototype.passesExcludeFilter = function (type) {
-	let passes = true;
-	if(FILE_EXCLUDE_FILTER.length > 0)
-	{
-		for(let i = 0; i < FILE_EXCLUDE_FILTER.split(","); i++)
-		{
-			// match on it...
-		}
-	}
-	return passes;
-}
-
-noteProvider.prototype.open = function (name) {
-	throw 'Not implemented!';
-	//GLib.spawn_command_line_async('xdg-open ' + name);
+//Defines the top level Class
+function Class() { }
+Class.prototype.construct = function() {};
+Class.extend = function(def) {
+  var classDef = function() {
+      if (arguments[0] !== Class) { this.construct.apply(this, arguments); }
+  };
+ 
+  var proto = new this(Class);
+  var superClass = this.prototype;
+ 
+  for (var n in def) {
+      var item = def[n];                      
+      if (item instanceof Function) item.$ = superClass;
+      proto[n] = item;
+  }
+ 
+  classDef.prototype = proto;
+ 
+  //Give this new class the same static extend method    
+  classDef.extend = this.extend;      
+  return classDef;
 };
 
 //-------------------------------------------------------------------
-
-// impl -- allows retrieval of files/notes from local paths
-
-function fileProvider() {
-	this._init();
-}
-
-fileProvider.prototype = new noteProvider();
-fileProvider.prototype.constructor = fileProvider;
-fileProvider.baseConstructor = noteProvider;
-fileProvider.superClass = noteProvider.prototype;
-
-fileProvider.prototype.passesExcludeFilter = function (queryInfo) 
-{
-    let result = false;
-
-	switch(queryInfo.get_file_type())
-	{
-		case Gio.FileType.SYMBOLIC_LINK:
-			result = SHOW_SYMLINKS;      // doesn't seem to work?
-			break;
-		case Gio.FileType.DIRECTORY:
-			result = SHOW_DIRECTORIES;
-			break;
-		default:
-			result = true;
-			break;
-	}
-	
-	if (! SHOW_SYMLINKS)
-	{
-		result &= (!queryInfo.get_attribute_boolean(Gio.FILE_ATTRIBUTE_STANDARD_IS_SYMLINK));	// this works
-	}
-	
-	if (! SHOW_HIDDEN_FILES)
-	{
-		result &= (!queryInfo.get_attribute_boolean(Gio.FILE_ATTRIBUTE_STANDARD_IS_HIDDEN));
-	}
-	
-	return result;
-};
-
-fileProvider.prototype.list = function (directory) {
-    fileList = new Array();
-    if (directory.query_exists(null)) 
-    {
-        infos = directory.enumerate_children('standard::name,standard::is-symlink,standard::is-hidden,standard::type,standard::size', 0, null, null)
-        let child_info = null;
-        while (fileList.length < MAX_LIST_SIZE && (child_info = infos.next_file(null, null)) != null)
-        {
-        	if(this.passesExcludeFilter(child_info))
-        	{
-        		fileList.push(child_info.get_name());
-        	}
+// abstract noteProvider.
+var NoteProvider = Class.extend({
+	construct: function() { },
+	type: function() { return "NoteProvider"; },
+	list: function(noteLocation) { throw 'Not implemented!'; },
+ 	update: function() { throw 'Not implemented!'; },
+ 	passesExcludeFilter: function (noteName) 
+ 	{ 
+		let matches = false; // if it matches, we exclude it.
+		let patternList = FILE_EXCLUDE_FILTER; 
+		if(patternList.length > 0)
+		{
+			for(let i = 0; i < patternList.split(","); i++)
+			{
+				let pattern = patternList[i];
+				if (! FULL_REGEX)
+					pattern = patternList[i].replace("*", ".*");
+				
+				matches |= new RegExp(pattern, 'gi').test(noteName); // match on it...
+			}
 		}
-    }
-    
-	return fileList;
-};
+		return (!matches);  // poor function name - if it matches it DOESN'T 
+ 	},
+ 	
+ 	open: function (note) { throw 'Not implemented!'; }
+});
 
-fileProvider.prototype.open = function (name) {
-    let f = Gio.file_new_for_path(name);
-    let uri = f.get_uri();
-	Gio.app_info_launch_default_for_uri(uri, null);
-};
 
-fileProvider.prototype.type = function () {
-	return 'FileProvider';	
-};
-
-fileProvider.prototype._init = function () {
-
-}
+//-------------------------------------------------------------------
+// impl -- allows retrieval of files/notes from local paths
+var FileProvider = NoteProvider.extend({
+	type: function() 
+	{ 
+		return "FileProvider";	
+	},
+	
+	list: function(directory) 
+	{ 
+		fileList = new Array();
+		if (directory.query_exists(null)) 
+		{
+			infos = directory.enumerate_children('standard::name,standard::is-symlink,standard::is-hidden,standard::type,standard::size', 0, null, null)
+			let child_info = null;
+			while (fileList.length < MAX_LIST_SIZE && (child_info = infos.next_file(null, null)) != null)
+			{
+				if(this.passesExcludeFilter(child_info))
+				{
+					fileList.push(child_info.get_name());
+				}
+			}
+		}
+		
+		return fileList;
+	},
+	
+ 	update: function() 
+ 	{ 
+ 		throw 'Not implemented!'; 
+ 	},
+ 	
+ 	passesExcludeFilter: function (queryInfo)
+ 	{
+		let result = false;
+		
+		switch(queryInfo.get_file_type())
+		{
+			case Gio.FileType.SYMBOLIC_LINK:      // doesn't seem to work?
+				result = SHOW_SYMLINKS; 
+				break;
+			case Gio.FileType.DIRECTORY:
+				result = SHOW_DIRECTORIES;
+				break;
+			default:
+				result = true;
+				break;
+		}
+		
+		if (! SHOW_SYMLINKS)
+		{
+			result &= (!queryInfo.get_attribute_boolean(Gio.FILE_ATTRIBUTE_STANDARD_IS_SYMLINK));	// this works
+		}
+		
+		if (! SHOW_HIDDEN_FILES)
+		{
+			result &= (!queryInfo.get_attribute_boolean(Gio.FILE_ATTRIBUTE_STANDARD_IS_HIDDEN));
+		}
+		
+		// Call super class to do the filename pattern matching
+		result &= arguments.callee.$.passesExcludeFilter.call(queryInfo.get_name());
+		
+		return result;
+ 	},
+	
+ 	open: function (name) 
+ 	{ 
+		let f = Gio.file_new_for_path(name);
+		let uri = f.get_uri();
+		Gio.app_info_launch_default_for_uri(uri, null);
+ 	}	
+});
