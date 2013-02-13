@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="com.servebeer.gamed.path-monitor@kamikaze" path="/com/servebeer/gamed/path-monitor@kamikaze/">
+    <key type="s" name="watchedpath">
+      <default>''</default>
+      <summary>Monitored Path</summary>
+      <description>This is the path the applet will watch for any new contents. It will display these and allow you to open them with your default launcher.</description>
+    </key>
+  </schema>
+</schemalist>
