@@ -12,10 +12,10 @@
 // Author: Mick Saunders
 //
 // Changes for 0.55 : * More complete support for file/path pattern exclusions.
-// NOTE: You can change the FILE_EXCLUDE_FILTER variable below to put in a list
+// NOTE: You can change the fileExcludeFilter variable below to put in a list
 //       of shell style patterns to match files on. Using comma (,) is NOT supported
 //       as we use it to delineate the patterns you want to use to exclude files.
-//       If you know REGEXP then enable the 'FULL_REGEX' flag and you can use them too.
+//       If you know REGEXP then enable the 'fullRegex' flag and you can use them too.
 //
 //
 // Changes for 0.5 : * Hacky support for multiple instances.
@@ -35,7 +35,7 @@
 // Notes: This is my very first applet and in fact, my first GPL released code of any sort.
 //        Go easy on me!
 
-const NAME = 'path-monitor-test';
+const NAME = 'path-monitor';
 const UUID = NAME + '@kamikaze';
 
 const Lang = imports.lang;
@@ -61,20 +61,7 @@ const MAX_LIST_SIZE = 25;
 
 // Allow maximum of 5 instances of path-monitor.
 const MAX_INSTANCES = 5;
-const debug = false;
-
-// Put in the list of file patterns, comma separated, you wish to exclude from the file list.
-// e.g. to exclude files starting with 'a' and files ending in '~' 
-//         you'd do: var FILE_EXCLUDE_FILTER = "a*,*~";
-var FILE_EXCLUDE_FILTER = "*~,*DO*"; // exclude temp files such as gedit copies.
-var FULL_REGEX = false;    // to make it simpler for people we use shell style globbing
-                           // instead of full Regex support. Basically we just replace
-                           // '*' with '.*'
-
-// Show hidden files, symlinks, directories,
-const SHOW_HIDDEN_FILES = false;
-const SHOW_DIRECTORIES = true;
-const SHOW_SYMLINKS = true;
+const debug = true;
 
 //-------------------------------------------------------------------
 function debugLog(text) {
@@ -94,6 +81,9 @@ function MyApplet(orientation, panel_height, workingPath, index, master) {
 MyApplet.prototype = {
     __proto__: Applet.IconApplet.prototype,
 
+    _entry: null, // entry text box for path monitoring
+    _excludeEntry: null,  // entry text box for file exclusion
+    
     _init: function(orientation, panel_height, workingPath, index, master) {
         Applet.IconApplet.prototype._init.call(this, orientation, panel_height);
 
@@ -133,16 +123,62 @@ MyApplet.prototype = {
             {
                 errorLog(e);
             }
-
+            // set up the settings right-click menu
+            this._setupContextMenu();
         }
         catch (e) {
             errorLog(e);
         }
     },
 
+    _setupContextMenu: function() 
+    {
+    	if (this.provider != null)
+    	{
+			let hiddenFilesSwitch = new PopupMenu.PopupSwitchMenuItem(_("Show hidden files"), this.provider.showHiddenFiles);
+			let directoriesSwitch = new PopupMenu.PopupSwitchMenuItem(_("Show directories"), this.provider.showDirectories);
+			let symlinksSwitch = new PopupMenu.PopupSwitchMenuItem(_("Show symbolic links"), this.provider.showSymlinks);
+			
+			this._applet_context_menu.addMenuItem(hiddenFilesSwitch);
+			this._applet_context_menu.addMenuItem(directoriesSwitch);
+			this._applet_context_menu.addMenuItem(symlinksSwitch);
+			
+			hiddenFilesSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleHiddenFiles(); this._onNotesChange(); } ));
+			directoriesSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleDirectories(); this._onNotesChange(); } ));
+			symlinksSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleSymlinks(); this._onNotesChange(); } ));
+
+			this._excludeEntry = new St.Entry({name: 'excludeFilter',
+										can_focus: true,
+										track_hover: false,
+										hint_text: _("Enter exclude file pattern")});
+			this._excludeEntry.lastPattern = "";
+			
+			this._excludeEntry.connect('key-release-event', Lang.bind(this, function(entry, event) 
+			{
+				let key = event.get_key_symbol();
+				if (key == Clutter.KEY_Return) 
+				{
+					this.provider.setExcludeFilter(this._excludeEntry.text);
+					this.onNotesChange();
+					
+					return true;
+				}
+				else if (key == Clutter.KEY_Escape) 
+				{
+					this._excludeEntry.text = this._excludeEntry.lastPattern;
+					return true;
+				}
+				return false;
+			}));
+			this._excludeEntry.set_style("padding-left: 20px;padding-top:5px;padding-bottom:5px;");
+			this._applet_context_menu.addActor(this._excludeEntry);
+		}
+    },
+    
      _onNotesChange: function () {
          this.menu.removeAll();
      	 this._updateMenu(this.provider.list(this.notes_directory));
+         this._excludeEntry.lastPattern = this._excludeEntry.text;
      },
      
      _updateMenu: function (fileList) {
@@ -179,6 +215,7 @@ MyApplet.prototype = {
         this._entry.connect('key-release-event', Lang.bind(this, function(entry, event) 
         {
             let key = event.get_key_symbol();
+            debugLog("key pressed ="+key);
             if (key == Clutter.KEY_Return) 
             {
                 let path = this._entry.text;
@@ -189,12 +226,15 @@ MyApplet.prototype = {
                 }
                 else
                 {
-                    debugLog("Path not found, or inaccessible: " + path);
+                    errorLog("Path not found, or inaccessible: " + path);
                 }
                 return true;
             }
             else if (key == Clutter.KEY_Escape) 
             {
+            	// doesn't seem to come in here?
+            	debugLog("ESC pressed. path="+this.path+",this._entry.text="+this._entry.text);
+            	this._entry.text = this.path;
                 return true;
             }
             return false;
@@ -434,21 +474,41 @@ Class.extend = function(def) {
 var NoteProvider = Class.extend({
     patterns: new String(),
     patternList: [],
+
+    // Put in the list of file patterns, comma separated, you wish to exclude from the file list.
+    // e.g. to exclude files starting with 'a' and files ending in '~' 
+    //         you'd do: var fileExcludeFilter = "a*,*~";
+	fileExcludeFilter: "*~", // exclude temp files such as gedit copies.
+	
+	// to make it simpler for people we use shell style globbing
+    // instead of full Regex support. Basically we just replace
+    // '*' with '.*'
+	fullRegex: false,    
     
     construct: function() 
 	{
-	    // fix up the pattern filter to be regex compliant for searching
-	    if( ! FULL_REGEX)
+		// defaults.
+		this._setupFilter(this.fileExcludeFilter, this.fullRegex);
+	},
+
+	_setupFilter: function(pattern, isRegex)
+	{
+		// fix up the pattern filter to be regex compliant for searching
+	    if( ! isRegex)
 	    {
-	        let patterns = FILE_EXCLUDE_FILTER.replace(new RegExp("\\.", "g"), "\\.");
-	        patterns = patterns.replace(new RegExp("\\*", "g"), ".*");
-	        this.patterns = patterns;
+	      this.patterns = pattern.replace(new RegExp("\\.", "g"), "\\.");
+	      this.patterns = this.patterns.replace(new RegExp("\\*", "g"), ".*");
 	    }
 	    else
-	      this.patterns = patterns;
+	      this.patterns = pattern;
 	    
 	    if (this.patterns.length > 0)
 	      this.patternList = this.patterns.split(",");
+	},
+	
+	setExcludeFilter: function (newFilter, isRegex)
+	{
+		this._setupFilter(newFilter, isRegex);
 	},
 	
 	type: function() { return "NoteProvider"; },
@@ -457,7 +517,6 @@ var NoteProvider = Class.extend({
  	passesExcludeFilter: function (noteName) 
  	{ 
 		let matches = false; // if it matches, we exclude it.
-		debugLog("FILE_EXCLUDE_FILTER=" + FILE_EXCLUDE_FILTER);
 		debugLog("patterns=" + this.patterns);
 		if(this.patternList.length > 0)
 		{
@@ -477,6 +536,16 @@ var NoteProvider = Class.extend({
 //-------------------------------------------------------------------
 // impl -- allows retrieval of files/notes from local paths
 var FileProvider = NoteProvider.extend({
+
+	// Show hidden files, symlinks, directories,
+    showHiddenFiles: false,
+    showDirectories: true,
+    showSymlinks: true,
+    
+    toggleHidden: function () { this.showHiddenFiles = (! this.showHiddenFiles); },
+    toggleDirectories: function () { this.showDirectories = (! this.showDirectories); },
+    toggleSymlinks: function () { this.showSymlinks = (! this.showSymlinks); },
+		
 	type: function() 
 	{ 
 		return "FileProvider";	
@@ -513,22 +582,22 @@ var FileProvider = NoteProvider.extend({
 		switch(queryInfo.get_file_type())
 		{
 			case Gio.FileType.SYMBOLIC_LINK:      // doesn't seem to work?
-				result = SHOW_SYMLINKS; 
+				result = this.showSymlinks; 
 				break;
 			case Gio.FileType.DIRECTORY:
-				result = SHOW_DIRECTORIES;
+				result = this.showDirectories;
 				break;
 			default:
 				result = true;
 				break;
 		}
 		
-		if (! SHOW_SYMLINKS)
+		if (! this.showSymlinks)
 		{
 			result &= (!queryInfo.get_attribute_boolean(Gio.FILE_ATTRIBUTE_STANDARD_IS_SYMLINK));	// this works
 		}
 		
-		if (! SHOW_HIDDEN_FILES)
+		if (! this.showHiddenFiles)
 		{
 			result &= (!queryInfo.get_attribute_boolean(Gio.FILE_ATTRIBUTE_STANDARD_IS_HIDDEN));
 		}
