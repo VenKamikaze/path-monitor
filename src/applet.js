@@ -170,7 +170,7 @@ MyApplet.prototype = {
 				}
 				return false;
 			}));
-			this._excludeEntry.set_style("padding-left: 20px;padding-top:5px;padding-bottom:5px;");
+			this._excludeEntry.set_style("padding-left: 1.7em;padding-top:5px;padding-bottom:5px;");
 			this._applet_context_menu.addActor(this._excludeEntry);
 		}
     },
