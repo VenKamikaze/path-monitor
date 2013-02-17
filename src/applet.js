@@ -4,14 +4,21 @@
 // Be wary, this applet will open ANY file with the default handler in the directory it monitors
 // Do NOT point this at a downloads directory or an untrusted source of any kind!
 //
-// Disclaimer: I am not responsible for any data damange, bugs, 
+// Disclaimer: I am not responsible for any data damage, bugs, 
 // emotional hurt suffered or natural disasters that may arise from use
 // of this applet. Use it carefully :)
 //
-// Version 0.55
+// Version 0.9
 // Author: Mick Saunders
 //
-// Changes for 0.55 : * More complete support for file/path pattern exclusions.
+// Changes for 0.9 : * Context menu for enabling/disabling file filtering
+//                   * Context menu for advanced filtering using a basic kind of shell globbing, or RegExp
+//                   * Allow separate filtering per instance of path-monitor
+//                   * Allow the gschema to store these extra variables
+//                   
+// NOTE: Using a comma (,) is NOT supported for the path filtering at this time
+//
+// Changes for 0.55 (UNRELEASED) : * More complete support for file/path pattern exclusions.
 // NOTE: You can change the fileExcludeFilter variable below to put in a list
 //       of shell style patterns to match files on. Using comma (,) is NOT supported
 //       as we use it to delineate the patterns you want to use to exclude files.
@@ -35,7 +42,7 @@
 // Notes: This is my very first applet and in fact, my first GPL released code of any sort.
 //        Go easy on me!
 
-const NAME = 'path-monitor';
+const NAME = 'path-monitor-test';
 const UUID = NAME + '@kamikaze';
 
 const Lang = imports.lang;
@@ -54,7 +61,9 @@ const HOME = GLib.getenv("HOME");
 
 const GSETTINGS_SCHEMA = 'com.servebeer.gamed.' + UUID;
 const FALLBACK_GSETTINGS_PATH = HOME + "/.local/share/cinnamon/applets/" + NAME + "\@kamikaze";
-const PATH_KEY = "watchedpath";
+
+const PATH_KEY = "watchedpaths";
+const EXCLUDE_FLAGS_KEY = "excludeFlags";
 
 // TODO: see if we can find out the font size and screen size and make this dynamic.
 const MAX_LIST_SIZE = 25;
@@ -117,7 +126,7 @@ MyApplet.prototype = {
             try
             {
                 this._settings = loadSettings(GSETTINGS_SCHEMA, workingPath);
-                this.path = this.getSetting(PATH_KEY).split(",")[this._pathMonID];
+                this.path = this.getSettingString(PATH_KEY).split(",")[this._pathMonID];
             }
             catch (e)
             {
@@ -138,14 +147,19 @@ MyApplet.prototype = {
 			let hiddenFilesSwitch = new PopupMenu.PopupSwitchMenuItem(_("Show hidden files"), this.provider.showHiddenFiles);
 			let directoriesSwitch = new PopupMenu.PopupSwitchMenuItem(_("Show directories"), this.provider.showDirectories);
 			let symlinksSwitch = new PopupMenu.PopupSwitchMenuItem(_("Show symbolic links"), this.provider.showSymlinks);
+			let docTempSwitch = new PopupMenu.PopupSwitchMenuItem(_("Show temp document files"), this.provider.showDocTempFiles);
 			
 			this._applet_context_menu.addMenuItem(hiddenFilesSwitch);
 			this._applet_context_menu.addMenuItem(directoriesSwitch);
 			this._applet_context_menu.addMenuItem(symlinksSwitch);
+			this._applet_context_menu.addMenuItem(docTempSwitch);
 			
 			hiddenFilesSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleHiddenFiles(); this._onNotesChange(); } ));
 			directoriesSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleDirectories(); this._onNotesChange(); } ));
 			symlinksSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleSymlinks(); this._onNotesChange(); } ));
+			docTempSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleDocTempFiles(); this._onNotesChange(); } ));
+
+            this._applet_context_menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
 			this._excludeEntry = new St.Entry({name: 'excludeFilter',
 										can_focus: true,
@@ -159,7 +173,7 @@ MyApplet.prototype = {
 				if (key == Clutter.KEY_Return) 
 				{
 					this.provider.setExcludeFilter(this._excludeEntry.text);
-					this.onNotesChange();
+					this._onNotesChange();
 					
 					return true;
 				}
@@ -172,8 +186,19 @@ MyApplet.prototype = {
 			}));
 			this._excludeEntry.set_style("padding-left: 1.7em;padding-top:5px;padding-bottom:5px;");
 			this._applet_context_menu.addActor(this._excludeEntry);
+
+            this._applet_context_menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            this._applet_context_menu.addAction("Monitor an extra path...", Lang.bind(this, function() {
+                                                                            
+                                                                    }
 		}
     },
+
+     _saveAllFlags: function() {
+         let flags = 0;
+         if(this.fileProvider.showHiddenFiles)
+             
+     },
     
      _onNotesChange: function () {
          this.menu.removeAll();
@@ -240,6 +265,7 @@ MyApplet.prototype = {
             return false;
         }));
         this.menu.addActor(this._entry);
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
     },
 
     on_applet_clicked: function(event) {
@@ -292,31 +318,29 @@ MyApplet.prototype = {
          this.path = path;
     },
 
+    // set a setting for our instance
     setSetting: function (key, value) 
     {
         try
         {
-        	if (key == PATH_KEY)
+            // Handle multi-path
+        	let allVals = this.getSettingString(key);
+        	let newValue = new String();
+        	let allValArray = allVals.split(",");
+        	for(let p in allValArray)
         	{
-        		// Handle multi-path
-        		let allPaths = this.getSetting(PATH_KEY);
-        		let newValue = new String();
-        		let pathsArray = allPaths.split(",");
-        		for(let p in pathsArray)
+        		newValue += (newValue.length > 0 ? "," : "");
+        		if(p == this._pathMonID)
         		{
-        			newValue += (newValue.length > 0 ? "," : "");
-        			if(p == this._pathMonID)
-        			{
-        				newValue += value;
-        			}
-        			else
-        			{
-        				newValue += pathsArray[p];
-        			}
+        			newValue += value;
         		}
-        		debugLog("Storing new path. allPaths="+allPaths + " newPaths="+newValue);
-        		value = newValue;
+        		else
+        		{
+        			newValue += allValArray[p];
+        	    }
         	}
+        	debugLog("Storing new setting. allVals="+allVals + " newVals="+newValue);
+        	value = newValue;
         	this._settings.set_string(key, value);
         }
         catch (e)
@@ -325,11 +349,30 @@ MyApplet.prototype = {
         }
     },
 
-    getSetting: function(key) 
+    // for all instances
+    getSettingString: function(key) 
     {
         try
         {
             return this._settings.get_string(key);
+        }
+        catch (e)
+        {
+            errorLog(e);
+        }
+        return null;
+    },
+
+    // only for our instance
+    getFlags: function() 
+    {
+        let allFlags = "";
+        try
+        {
+            let flagArray = [];
+            allFlags = this._settings.get_string(EXCLUDE_FLAGS_KEY);
+            flagArray = allFlags.split(",");
+            return flagArray[this._pathMonID] == undefined ? null : flagArray[this._pathMonID];
         }
         catch (e)
         {
@@ -475,15 +518,26 @@ var NoteProvider = Class.extend({
     patterns: new String(),
     patternList: [],
 
+
     // Put in the list of file patterns, comma separated, you wish to exclude from the file list.
-    // e.g. to exclude files starting with 'a' and files ending in '~' 
-    //         you'd do: var fileExcludeFilter = "a*,*~";
-	fileExcludeFilter: "*~", // exclude temp files such as gedit copies.
+    // e.g. to exclude files starting with 'a' and files ending in 'b' 
+    //         you'd do: var fileExcludeFilter = "a*,*b";
+	fileExcludeFilter: "", 
 	
 	// to make it simpler for people we use shell style globbing
     // instead of full Regex support. Basically we just replace
     // '*' with '.*'
 	fullRegex: false,    
+
+    // For people that don't know regular expressions, we make it a simple switch to set up
+    // the regexp required to show or hide gedit/vim style backup files (files that end in ~)
+    showDocTempFiles: false,
+
+    docTempFlag: 0x8,
+    _tempDocFilePattern: ".*\~",
+
+    toggleDocTempFiles: function () { this.showDocTempFiles = (! this.showDocTempFiles); this._setupFilter(this.fileExcludeFilter, this.fullRegex); },
+    getEnabledFlags: function () { return this.showDocTempFiles ? this.docTempFlag : 0; },
     
     construct: function() 
 	{
@@ -501,9 +555,16 @@ var NoteProvider = Class.extend({
 	    }
 	    else
 	      this.patterns = pattern;
+
+        if ( ! this.showDocTempFiles) // don't show them/setup the regexp to exclude them
+          this.patterns += (this.patterns.length > 0) ? ("," + this._tempDocFilePattern) : this._tempDocFilePattern;
 	    
+		debugLog("setupFilter: patterns=" + this.patterns);
+
 	    if (this.patterns.length > 0)
-	      this.patternList = this.patterns.split(",");
+	      this.patternList = this.patterns.split(","); // TODO: instead of looping over an array, make this a single regexp
+        else
+          this.patternList = [];
 	},
 	
 	setExcludeFilter: function (newFilter, isRegex)
@@ -542,9 +603,22 @@ var FileProvider = NoteProvider.extend({
     showDirectories: true,
     showSymlinks: true,
     
+    hiddenFileFlag: 0x1,
+    directoryFlag: 0x2,
+    symlinkFlag: 0x4,
+
     toggleHidden: function () { this.showHiddenFiles = (! this.showHiddenFiles); },
     toggleDirectories: function () { this.showDirectories = (! this.showDirectories); },
     toggleSymlinks: function () { this.showSymlinks = (! this.showSymlinks); },
+
+    getEnabledFlags: function () { 
+        let flags = 0;
+        flags |= this.showHiddenFiles ? this.hiddenFileFlag : 0;
+        flags |= this.showDirectories ? this.directoryFlag : 0;
+        flags |= this.symlinkFlag ? this.symlinkFlag : 0;
+        flags |= arguments.callee.$.getEnabledFlags.call(this);
+        return flags;
+    },
 		
 	type: function() 
 	{ 
