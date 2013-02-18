@@ -62,8 +62,8 @@ const HOME = GLib.getenv("HOME");
 const GSETTINGS_SCHEMA = 'com.servebeer.gamed.' + UUID;
 const FALLBACK_GSETTINGS_PATH = HOME + "/.local/share/cinnamon/applets/" + NAME + "\@kamikaze";
 
-const PATH_KEY = "watchedpaths";
-const EXCLUDE_FLAGS_KEY = "excludeFlags";
+const PATH_KEY = "watchedpath";
+const EXCLUDE_FLAGS_KEY = "excludeflags";
 
 // TODO: see if we can find out the font size and screen size and make this dynamic.
 const MAX_LIST_SIZE = 25;
@@ -83,8 +83,8 @@ function errorLog(text) {
 
 //-------------------------------------------------------------------
 
-function MyApplet(orientation, panel_height, workingPath, index, master) {
-    this._init(orientation, panel_height, workingPath, index, master);
+function MyApplet(orientation, panel_height, workingPath, internalId, instancesToSpawn, master) {
+    this._init(orientation, panel_height, workingPath, internalId, instancesToSpawn, master);
 }
 
 MyApplet.prototype = {
@@ -93,7 +93,12 @@ MyApplet.prototype = {
     _entry: null, // entry text box for path monitoring
     _excludeEntry: null,  // entry text box for file exclusion
     
-    _init: function(orientation, panel_height, workingPath, index, master) {
+    _isMasterCopy: false,
+    _nextPathMonID: null,
+    _pathMonID: null,
+    _childApplets: null,
+    
+    _init: function(orientation, panel_height, workingPath, internalId, instancesToSpawn, master) {
         Applet.IconApplet.prototype._init.call(this, orientation, panel_height);
 
         this._orientation = orientation;
@@ -102,16 +107,20 @@ MyApplet.prototype = {
         
         try 
         {
-        	this._pathMonID = index;
+        	this._pathMonID = internalId;
 			
         	if (master)
 			{
 				debugLog("Set to master instance. pathMonID="+this._pathMonID);
 				this._isMasterCopy = true;
-				this._nextPathMonID = index;
-				this._pathMonID = index;
+				this._nextPathMonID = this._pathMonID;
 				this._childApplets = new Array();
-				setTimeout(Lang.bind(this, this._cloneApplet), 500);
+				
+				// spawn the new instances
+				setTimeout(Lang.bind(this, function () {
+							for(let i = 0; i < instancesToSpawn; i++)
+								this._cloneApplet();
+				           }), 400);
 			}
 
             this.set_applet_icon_name("folder-saved-search-symbolic");
@@ -126,7 +135,8 @@ MyApplet.prototype = {
             try
             {
                 this._settings = loadSettings(GSETTINGS_SCHEMA, workingPath);
-                this.path = this.getSettingString(PATH_KEY).split(",")[this._pathMonID];
+                this.path = (this.getSettingString(PATH_KEY).split(",")[this._pathMonID] == undefined) ? ""
+                           : this.getSettingString(PATH_KEY).split(",")[this._pathMonID];
             }
             catch (e)
             {
@@ -187,17 +197,24 @@ MyApplet.prototype = {
 			this._excludeEntry.set_style("padding-left: 1.7em;padding-top:5px;padding-bottom:5px;");
 			this._applet_context_menu.addActor(this._excludeEntry);
 
-            this._applet_context_menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-            this._applet_context_menu.addAction("Monitor an extra path...", Lang.bind(this, function() {
-                                                                            
-                                                                    }
+			// Only allow spawning new copies from the master instance
+			// to allow us to keep adding/removing child instances clean.
+			if (this.isMasterCopy())
+			{
+				this._applet_context_menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+				this._applet_context_menu.addAction("Monitor an extra path...", 
+					 Lang.bind(this, function() {
+                                this._cloneApplet();
+                              }));
+            }
 		}
     },
 
      _saveAllFlags: function() {
          let flags = 0;
-         if(this.fileProvider.showHiddenFiles)
-             
+         //if(this.fileProvider.showHiddenFiles)
+         // get the flags from the provider instead.
+         
      },
     
      _onNotesChange: function () {
@@ -383,23 +400,22 @@ MyApplet.prototype = {
 
     _cloneApplet: function()
     {
-    	debugLog("Spawning new path-monitor applets");
-    	if (this._pathMonID <= 0)
+    	if (! this.isMasterCopy())
+    	{
+    		errorLog("Refusing to spawn instances from a child applet. _pathMonID=" + this._pathMonID);
     		return;
+    	}
     	
        	let ourPanel = this._panelLocation;
-       	for(let i = 0; i < (this._pathMonID); i++)
-       	{
-       		debugLog("Spawning new applet...");
-       		setTimeout(Lang.bind(this, function() { 
-       			          let childApplet = new MyApplet(this._orientation, this._panel_height, this.metaPath, this.getNextPathMonID(), false);
-       			          this.addChildApplet(childApplet);
-       			          ourPanel.add(childApplet.actor, {x_align: ourPanel.x_align});
-       			          childApplet._panelLocation = ourPanel;
-       			          childApplet.showPath();
-       			          childApplet.monitorPath(childApplet.path);
-       		            }), (30*i)+20);
-       	}
+		debugLog("Spawning new applet...");
+		setTimeout(Lang.bind(this, function() { 
+					  let childApplet = new MyApplet(this._orientation, this._panel_height, this.metaPath, this.getNextPathMonID(), 0, false);
+					  this.addChildApplet(childApplet);
+					  ourPanel.add(childApplet.actor, {x_align: ourPanel.x_align});
+					  childApplet._panelLocation = ourPanel;
+					  childApplet.showPath();
+					  childApplet.monitorPath(childApplet.path);
+					}), 50);
     },
     
     isMasterCopy: function()
@@ -411,7 +427,7 @@ MyApplet.prototype = {
     {
     	if (this.isMasterCopy())
     	{
-    		return (--this._nextPathMonID);
+    		return (++this._nextPathMonID);
     	}
     	return 0;
     }
@@ -424,7 +440,7 @@ function main(metadata, orientation, panel_height) {
     let gsettings = loadSettings(GSETTINGS_SCHEMA, metadata.path);
     let allPaths = new String(gsettings.get_string(PATH_KEY));
    
-	let myApplet = new MyApplet(orientation, panel_height, metadata.path, (allPaths.split(",").length -1), true);
+	let myApplet = new MyApplet(orientation, panel_height, metadata.path, 0, (allPaths.split(",").length -1), true);
 	myApplet.showPath();
 	myApplet.monitorPath(myApplet.path);
 	
@@ -470,7 +486,7 @@ function findSchemaPath(workingPath) {
 }
 
 function loadSettings(schemaId, path) {
-    schemaSettings = loadGSchemaSettings(schemaId, findSchemaPath(path));
+    let schemaSettings = loadGSchemaSettings(schemaId, findSchemaPath(path));
     return Gio.Settings.new_full(schemaSettings, null, null);
 }
 
@@ -478,8 +494,8 @@ function loadGSchemaSettings(schemaId, path) {
     if (path == null) 
         return null;
 
-    schemaSource = Gio.SettingsSchemaSource.new_from_directory(path, null, false, null);
-    settingsSchema = schemaSource.lookup(schemaId, false);
+    let schemaSource = Gio.SettingsSchemaSource.new_from_directory(path, null, false, null);
+    let settingsSchema = schemaSource.lookup(schemaId, false);
     if(settingsSchema == null) { errorLog("Could not find gschema at path="+path); }
     return settingsSchema;
 }
@@ -627,10 +643,10 @@ var FileProvider = NoteProvider.extend({
 	
 	list: function(directory) 
 	{ 
-		fileList = new Array();
+		let fileList = new Array();
 		if (directory.query_exists(null)) 
 		{
-			infos = directory.enumerate_children('standard::name,standard::is-symlink,standard::is-hidden,standard::type,standard::size', 0, null, null)
+			let infos = directory.enumerate_children('standard::name,standard::is-symlink,standard::is-hidden,standard::type,standard::size', 0, null, null)
 			let child_info = null;
 			while (fileList.length < MAX_LIST_SIZE && (child_info = infos.next_file(null, null)) != null)
 			{
