@@ -69,7 +69,7 @@ const EXCLUDE_FLAGS_KEY = "excludeflags";
 const MAX_LIST_SIZE = 25;
 
 // Allow maximum of 5 instances of path-monitor.
-const MAX_INSTANCES = 5;
+const MAX_INSTANCES = 5; //TODO not used... should we have a max?
 const debug = true;
 
 //-------------------------------------------------------------------
@@ -97,6 +97,7 @@ MyApplet.prototype = {
     _nextPathMonID: null,
     _pathMonID: null,
     _childApplets: null,
+    _enabled: true,  // set this to false when we exit a child instance
     
     _init: function(orientation, panel_height, workingPath, internalId, instancesToSpawn, master) {
         Applet.IconApplet.prototype._init.call(this, orientation, panel_height);
@@ -204,8 +205,22 @@ MyApplet.prototype = {
 				this._applet_context_menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 				this._applet_context_menu.addAction("Monitor an extra path...", 
 					 Lang.bind(this, function() {
+                                this._addToSettings();
                                 this._cloneApplet();
                               }));
+            }
+            else
+            {
+				this._applet_context_menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+				this._applet_context_menu.addAction("Exit and stop monitoring...", 
+					 Lang.bind(this, function() {
+        			            debugLog("Exiting instance. pathMonID="+this._pathMonID);
+                    			this._panelLocation.remove_actor(this.actor);
+                    			this._panelLocation = null;
+                                this._enabled = false;
+                                this._removeSettings();
+                              }));
+
             }
 		}
     },
@@ -237,6 +252,11 @@ MyApplet.prototype = {
      	 this.setPath(path);
          this.monitorPath(path);
          this.setSetting(PATH_KEY, path);
+     },
+
+     setPath: function (path) {
+         this.lastPath = (this.path == null ? path : this.path);
+         this.path = path;
      },
 
      monitorPath: function (path) {
@@ -301,9 +321,12 @@ MyApplet.prototype = {
     		for(let i = 0; i < this._childApplets.length; i++)
     		{
     			let child = this._childApplets[i];
-    			debugLog("Adding child applet to panel, pathMonID="+child._pathMonID);
-    			this._panelLocation.add(child.actor);
-    			child._panelLocation = this._panelLocation;
+                if (child._enabled)
+                {
+        			debugLog("Adding child applet to panel, pathMonID="+child._pathMonID);
+        			this._panelLocation.add(child.actor);
+        			child._panelLocation = this._panelLocation;
+                }
     		}
     	}
     },
@@ -316,9 +339,12 @@ MyApplet.prototype = {
     		for(let i = 0; i < this._childApplets.length; i++)
     		{
     			let child = this._childApplets[i];
-    			debugLog("Removing child applet from panel, pathMonID="+child._pathMonID);
-    			child._panelLocation.remove_actor(child.actor);
-    			child._panelLocation = null;
+                if (child._enabled)
+                {
+        			debugLog("Removing child applet from panel, pathMonID="+child._pathMonID);
+        			child._panelLocation.remove_actor(child.actor);
+        			child._panelLocation = null;
+                }
     		}
     	}
     },
@@ -330,32 +356,86 @@ MyApplet.prototype = {
     	}
     },
 
-    setPath: function (path) {
-         this.lastPath = (this.path == null ? path : this.path);
-         this.path = path;
+    // set a setting for our instance
+    _addToSettings: function ()
+    {
+        debugLog("addToSettings.");
+        try
+        {
+            // Add a settings space for our new instance.
+            // TODO make array of keys and loop over.
+            let allVals = this.getSettingString(PATH_KEY) + ",";
+            this._settings.set_string(PATH_KEY, allVals);
+
+            allVals = this.getSettingString(EXCLUDE_FLAGS_KEY) + ",";
+            this._settings.set_string(EXCLUDE_FLAGS_KEY, allVals);
+        }
+        catch (e)
+        {
+            errorLog(e);
+        }
+    },
+
+    _removeSettings: function()
+    {
+        debugLog("removeSettings.");
+        try
+        {
+            // TODO put the keys in an array and do a loop here
+            // Handle multi-path
+            let allVals = this.getSettingString(PATH_KEY);
+            let newValue = new String();
+            let allValArray = allVals.split(",");
+            for(let p in allValArray)
+            {
+                newValue += (p != this._pathMonID ? allValArray[p] : "");
+
+                if( (p != allValArray.length -1) && (p+1) != this._pathMonID ) // if the next instance is us, get rid of the comma
+                    newValue += ",";
+            }
+            debugLog("removeSettings. new PATH_KEY value is: "+newValue);
+            this._settings.set_string(PATH_KEY, newValue);
+
+            allVals = this.getSettingString(EXCLUDE_FLAGS_KEY);
+            newValue = new String();
+            allValArray = allVals.split(",");
+            for(let p in allValArray)
+            {
+                newValue += (p != this._pathMonID ? allValArray[p] : "");
+                 
+                if(p != (allValArray.length -1 && p != this._pathMonID) )
+                    newValue += ",";
+            }   
+            this._settings.set_string(EXCLUDE_FLAGS_KEY, allVals);
+        }
+        catch (e)
+        {
+            errorLog(e);
+        }
     },
 
     // set a setting for our instance
     setSetting: function (key, value) 
     {
+        debugLog("setSetting. key="+key + " value="+value);
         try
         {
             // Handle multi-path
         	let allVals = this.getSettingString(key);
         	let newValue = new String();
         	let allValArray = allVals.split(",");
-        	for(let p in allValArray)
-        	{
-        		newValue += (newValue.length > 0 ? "," : "");
-        		if(p == this._pathMonID)
-        		{
-        			newValue += value;
-        		}
-        		else
-        		{
-        			newValue += allValArray[p];
-        	    }
-        	}
+            for(let p in allValArray) 
+            {
+            	newValue += (newValue.length > 0 ? "," : "");
+            	if(p == this._pathMonID)
+        	    {
+        		    newValue += value;
+            	}
+                else
+                {
+                    newValue += allValArray[p];
+                }
+            }
         	debugLog("Storing new setting. allVals="+allVals + " newVals="+newValue);
         	value = newValue;
         	this._settings.set_string(key, value);
