@@ -15,8 +15,9 @@
 //                   * Context menu for advanced filtering using a basic kind of shell globbing, or RegExp
 //                   * Allow separate filtering per instance of path-monitor
 //                   * Allow the gschema to store these extra variables
+//                   ** Still working on the exclude pattern matching storage.
 //                   
-// NOTE: Using a comma (,) is NOT supported for the path filtering at this time
+// NOTE: Using a comma (,) is NOT supported for the file/path filtering at this time
 //
 // Changes for 0.55 (UNRELEASED) : * More complete support for file/path pattern exclusions.
 // NOTE: You can change the fileExcludeFilter variable below to put in a list
@@ -64,6 +65,7 @@ const FALLBACK_GSETTINGS_PATH = HOME + "/.local/share/cinnamon/applets/" + NAME 
 
 const PATH_KEY = "watchedpath";
 const FLAGS_KEY = "excludeflags";
+const EXCLUDE_KEY = "excludepatterns";
 
 // TODO: see if we can find out the font size and screen size and make this dynamic.
 const MAX_LIST_SIZE = 25;
@@ -142,14 +144,19 @@ MyApplet.prototype = {
             try
             {
                 this._settings = loadSettings(GSETTINGS_SCHEMA, workingPath);
-                this.path = (this.getSettingString(PATH_KEY).split(",")[this._pathMonID] == undefined) ? ""
-                           : this.getSettingString(PATH_KEY).split(",")[this._pathMonID];
+                this.path = this.getOurSetting(PATH_KEY) == null ? "" : this.getOurSetting(PATH_KEY);
+                
+                let ourFlags = this.getOurSetting(FLAGS_KEY);
+                
+                if (ourFlags != null)
+                	this.provider.setFlags(ourFlags);
             }
             catch (e)
             {
                 errorLog(e);
             }
-            // set up the settings right-click menu
+            
+            // set up the right-click menu
             this._setupContextMenu();
         }
         catch (e) {
@@ -257,16 +264,6 @@ MyApplet.prototype = {
          this.path = path;
      },
 
-     monitorPath: function (path) {
-         this.notes_directory = Gio.file_new_for_path(path);
-
-         this.monitor = this.notes_directory.monitor_directory(0, null, null);
-         this.monitor.connect('changed', Lang.bind(this, this._onNotesChange));
-         this._onNotesChange();
-
-         this._entry.text = path;
-     },
-     
     showPath: function () {
         this._entry = new St.Entry({name: 'notePath',
                              can_focus: true,
@@ -303,6 +300,17 @@ MyApplet.prototype = {
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
     },
 
+    monitorPath: function (path) {
+        this.notes_directory = Gio.file_new_for_path(path);
+
+        this.monitor = this.notes_directory.monitor_directory(0, null, null);
+        this.monitor.connect('changed', Lang.bind(this, this._onNotesChange));
+        this._onNotesChange();
+
+        this._entry.text = path;
+    },
+
+    
     on_applet_clicked: function(event) {
     	this.menu.toggle();
     },
@@ -354,74 +362,16 @@ MyApplet.prototype = {
     	}
     },
 
-    // set a setting for our instance
-//    _addToSettings: function ()
-//    {
-//        debugLog("addToSettings.");
-//        try
-//        {
-//            // Add a settings space for our new instance.
-//            // TODO make array of keys and loop over.
-//            let allVals = this.getSettingString(PATH_KEY) + ",";
-//            this._settings.set_string(PATH_KEY, allVals);
-//
-//            allVals = this.getSettingString(EXCLUDE_FLAGS_KEY) + ",";
-//            this._settings.set_string(EXCLUDE_FLAGS_KEY, allVals);
-//        }
-//        catch (e)
-//        {
-//            errorLog(e);
-//        }
-//    },
-
     _removeSettings: function ()
     {
     	this.saveAllSettings();
     },
     
-//    _removeSettings: function()
-//    {
-//        debugLog("removeSettings.");
-//        try
-//        {
-//            // TODO put the keys in an array and do a loop here
-//            // Handle multi-path
-//            let allVals = this.getSettingString(PATH_KEY);
-//            let newValue = new String();
-//            let allValArray = allVals.split(",");
-//            for(let p in allValArray)
-//            {
-//                newValue += (p != this._pathMonID ? allValArray[p] : "");
-//
-//                if( (p != allValArray.length -1) && (p+1) != this._pathMonID ) // if the next instance is us, get rid of the comma
-//                    newValue += ",";
-//            }
-//            debugLog("removeSettings. new PATH_KEY value is: "+newValue);
-//            this._settings.set_string(PATH_KEY, newValue);
-//
-//            allVals = this.getSettingString(EXCLUDE_FLAGS_KEY);
-//            newValue = new String();
-//            allValArray = allVals.split(",");
-//            for(let p in allValArray)
-//            {
-//                newValue += (p != this._pathMonID ? allValArray[p] : "");
-//                 
-//                if(p != (allValArray.length -1 && p != this._pathMonID) )
-//                    newValue += ",";
-//            }   
-//            this._settings.set_string(EXCLUDE_FLAGS_KEY, allVals);
-//        }
-//        catch (e)
-//        {
-//            errorLog(e);
-//        }
-//    },
-
-    // set a setting for our instance
+    // Sets all settings.
     setSetting: function (key, value) 
     {
         debugLog("setSetting. key="+key + " value="+value);
-		getMaster().saveAllSettings();	
+		this.getMaster().saveAllSettings();	
     },
 
     saveAllSettings: function ()
@@ -465,40 +415,8 @@ MyApplet.prototype = {
 		}
     },
     
-//   // set a setting for our instance
-//   setSetting: function (key, value) 
-//   {
-//       debugLog("setSetting. key="+key + " value="+value);
-//       try
-//       {
-//           // Handle multi-path
-//       	let allVals = this.getSettingString(key);
-//       	let newValue = new String();
-//       	let allValArray = allVals.split(",");
-//           for(let p in allValArray) 
-//           {
-//           	newValue += (newValue.length > 0 ? "," : "");
-//           	if(p == this._pathMonID)
-//       	    {
-//       		    newValue += value;
-//           	}
-//               else
-//               {
-//                   newValue += allValArray[p];
-//               }
-//           }
-//       	debugLog("Storing new setting. allVals="+allVals + " newVals="+newValue);
-//       	value = newValue;
-//       	this._settings.set_string(key, value);
-//       }
-//       catch (e)
-//       {
-//           errorLog(e);
-//       }
-//   },
-
     // for all instances
-    getSettingString: function(key) 
+    getAllSettings: function(key) 
     {
         try
         {
@@ -512,21 +430,10 @@ MyApplet.prototype = {
     },
 
     // only for our instance
-    getFlags: function() 
+    getOurSetting: function(key) 
     {
-        let allFlags = "";
-        try
-        {
-            let flagArray = [];
-            allFlags = this._settings.get_string(FLAGS_KEY);
-            flagArray = allFlags.split(",");
-            return flagArray[this._pathMonID] == undefined ? null : flagArray[this._pathMonID];
-        }
-        catch (e)
-        {
-            errorLog(e);
-        }
-        return null;
+		let settingsList = this.getAllSettings(key).split(",");
+		return flagArray[this._pathMonID] == undefined ? null : flagArray[this._pathMonID];
     },
 
     _cloneApplet: function()
