@@ -178,7 +178,7 @@ MyApplet.prototype = {
 			this._applet_context_menu.addMenuItem(symlinksSwitch);
 			this._applet_context_menu.addMenuItem(docTempSwitch);
 			
-			hiddenFilesSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleHiddenFiles(); this._onNotesChange(); } ));
+			hiddenFilesSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleHidden(); this._onNotesChange(); } ));
 			directoriesSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleDirectories(); this._onNotesChange(); } ));
 			symlinksSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleSymlinks(); this._onNotesChange(); } ));
 			docTempSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleDocTempFiles(); this._onNotesChange(); } ));
@@ -238,9 +238,10 @@ MyApplet.prototype = {
     },
     
      _onNotesChange: function () {
-         this.menu.removeAll();
+       this.menu.removeAll();
      	 this._updateMenu(this.provider.list(this.notes_directory));
-         this._excludeEntry.lastPattern = this._excludeEntry.text;
+       this._excludeEntry.lastPattern = this._excludeEntry.text;
+       this.saveAllSettings();
      },
      
      _updateMenu: function (fileList) {
@@ -364,56 +365,57 @@ MyApplet.prototype = {
 
     _removeSettings: function ()
     {
-    	this.getMaster().saveAllSettings();
+    	this.saveAllSettings();
     },
     
     // Sets all settings.
     setSetting: function (key, value) 
     {
         debugLog("setSetting. key="+key + " value="+value);
-		    this.getMaster().saveAllSettings();	
+		    this.saveAllSettings();	
     },
 
     saveAllSettings: function ()
     {
-		if (this.isMasterCopy())
+      if (! this.isMasterCopy() && this._masterApplet != null)
+      {
+        this.getMaster().saveAllSettings();
+      }
+      else if (this.isMasterCopy())
+      {
+        let pathValues = new String();
+        let flagValues = new String();
+        let excludeValues = new String();
+        for (let i in this._childApplets)
         {
-        	let pathValues = new String();
-        	let flagValues = new String();
-        	let excludeValues = new String();
-        	for (let child in this._childApplets)
-        	{
-            // CHILD IS AN ARRAY INDEX, FIX ME TODO
-        		debugLog("child="+child);
-        		pathValues += (pathValues.length > 0 ? "," : "");
-        		flagValues += (flagValues.length > 0 ? "," : "");
-        		excludeValues += (excludeValues.length > 0 ? "," : "");
+        	debugLog("i="+i);
+          let child = this._childApplets[i];
         		
-        		debugLog("saveAllSettings. child._enabled = " + child._enabled);
-        		if(child._enabled)
-        		{
-        			pathValues += child.path;
-        			flagValues += child.provider.getFlags();
-        			excludeValues += child.provider.excludeValues();
-        		}
+        	debugLog("saveAllSettings. child._enabled = " + child._enabled);
+        	if(child._enabled)
+        	{
+        	  pathValues += "," + child.path;
+        		flagValues += "," + child.provider.getFlags();
+        		excludeValues += "," + child.provider.getExcludeValues().join();
         	}
-        	
-        	let allPaths = this.path + "," + pathValues;
-        	let allFlags = this.provider.getFlags() + "," + flagValues;
-        	let allExcludes = this.provider.getExcludeValues() + "," + excludeValues;
-			
-        	try
-			{
-				debugLog("Storing new settings. allPaths="+allPaths);
-				this._settings.set_string(PATH_KEY, allPaths);
-				this._settings.set_string(FLAGS_KEY, allFlags);
-				// this._settings.set_string(EXCLUDE_KEY, allExcludes); M-1 again...
-			}
-			catch (e)
-			{
-				errorLog(e);
-			}
-		}
+        }
+
+        let allPaths = this.path + pathValues;
+        let allFlags = this.provider.getFlags() + flagValues;
+        let allExcludes = this.provider.getExcludeValues().join() + excludeValues;
+
+        try
+			  {
+				  debugLog("Storing new settings. allPaths="+allPaths + "|allFlags="+allFlags);
+				  this._settings.set_string(PATH_KEY, allPaths);
+				  this._settings.set_string(FLAGS_KEY, allFlags);
+				  // this._settings.set_string(EXCLUDE_KEY, allExcludes); M-1 again...
+			  }
+			  catch (e)
+			  {
+				  errorLog(e);
+			  }
+		  }
     },
     
     // for all instances
@@ -603,7 +605,7 @@ var NoteProvider = Class.extend({
     toggleDocTempFiles: function () { this.showDocTempFiles = (! this.showDocTempFiles); this._setupFilter(this.fileExcludeFilter, this.fullRegex); },
     
     getFlags: function () { return this.showDocTempFiles ? this.docTempFlag : 0; },
-    setFlags: function (flags) { this.showDocTempFiles = (this.showDocTempFiles & flags); },
+    setFlags: function (flags) { this.showDocTempFiles = (this.docTempFlag & flags); },
     
     construct: function() 
 	{
@@ -656,7 +658,7 @@ var NoteProvider = Class.extend({
 		return (!matches);  // poor var/func name - if it matches it DOESN'T pass the exclude filter
  	},
  	
- 	getExcludeValues: function () { return patternList; },
+ 	getExcludeValues: function () { return this.patternList; },
  	
  	open: function (note) { throw 'Not implemented!'; }
 });
@@ -680,19 +682,21 @@ var FileProvider = NoteProvider.extend({
     toggleSymlinks: function () { this.showSymlinks = (! this.showSymlinks); },
 
     getFlags: function () { 
-        let flags = 0;
-        flags |= this.showHiddenFiles ? this.hiddenFileFlag : 0;
-        flags |= this.showDirectories ? this.directoryFlag : 0;
-        flags |= this.symlinkFlag ? this.symlinkFlag : 0;
-        flags |= arguments.callee.$.getFlags.call(this);
-        return flags;
+      let flags = 0;
+      flags |= this.showHiddenFiles ? this.hiddenFileFlag : 0;
+      flags |= this.showDirectories ? this.directoryFlag : 0;
+      flags |= this.symlinkFlag ? this.symlinkFlag : 0;
+      flags |= arguments.callee.$.getFlags.call(this);
+      debugLog("getFlags, flags="+flags);
+      return flags;
     },
 
 	// recommended that list is called after this.
 	setFlags: function(flags) {
+    debugLog("setFlags, flags="+flags);
 		this.showHiddenFiles = (this.hiddenFileFlag & flags);
-		this.showDirectories = (this.showDirectories & flags);
-		this.showSymlinks = (this.showSymlinks & flags);
+		this.showDirectories = (this.directoryFlag & flags);
+		this.showSymlinks = (this.symlinkFlag & flags);
 		arguments.callee.$.setFlags.call(this, flags);
 	},
 	
