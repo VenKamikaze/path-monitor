@@ -327,12 +327,12 @@ MyApplet.prototype = {
     		for(let i = 0; i < this._childApplets.length; i++)
     		{
     			let child = this._childApplets[i];
-                if (child._enabled)
-                {
-        			debugLog("Adding child applet to panel, pathMonID="+child._pathMonID);
-        			this._panelLocation.add(child.actor);
-        			child._panelLocation = this._panelLocation;
-                }
+          if (child._enabled)
+          {
+        	  debugLog("Adding child applet to panel, pathMonID="+child._pathMonID);
+        		this._panelLocation.add(child.actor);
+        		child._panelLocation = this._panelLocation;
+          }
     		}
     	}
     },
@@ -345,12 +345,12 @@ MyApplet.prototype = {
     		for(let i = 0; i < this._childApplets.length; i++)
     		{
     			let child = this._childApplets[i];
-                if (child._enabled)
-                {
-        			debugLog("Removing child applet from panel, pathMonID="+child._pathMonID);
-        			child._panelLocation.remove_actor(child.actor);
-        			child._panelLocation = null;
-                }
+          if (child._enabled)
+          {
+        		debugLog("Removing child applet from panel, pathMonID="+child._pathMonID);
+        		child._panelLocation.remove_actor(child.actor);
+        		child._panelLocation = null;
+          }
     		}
     	}
     },
@@ -383,6 +383,7 @@ MyApplet.prototype = {
         	let excludeValues = new String();
         	for (let child in this._childApplets)
         	{
+            // CHILD IS AN ARRAY INDEX, FIX ME TODO
         		debugLog("child="+child);
         		pathValues += (pathValues.length > 0 ? "," : "");
         		flagValues += (flagValues.length > 0 ? "," : "");
