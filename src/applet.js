@@ -364,7 +364,7 @@ MyApplet.prototype = {
 
     _removeSettings: function ()
     {
-    	this.saveAllSettings();
+    	this.getMaster().saveAllSettings();
     },
     
     // Sets all settings.
