@@ -371,7 +371,7 @@ MyApplet.prototype = {
     setSetting: function (key, value) 
     {
         debugLog("setSetting. key="+key + " value="+value);
-		this.getMaster().saveAllSettings();	
+		    this.getMaster().saveAllSettings();	
     },
 
     saveAllSettings: function ()
@@ -467,6 +467,8 @@ MyApplet.prototype = {
     {
     	return (this._isMasterCopy != undefined && this._isMasterCopy);
     },
+
+    getMaster: function() { return this._masterApplet; },
     
     getNextPathMonID: function()
     {
