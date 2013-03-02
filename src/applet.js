@@ -145,7 +145,7 @@ MyApplet.prototype = {
             {
                 this._settings = loadSettings(GSETTINGS_SCHEMA, workingPath);
                 this.path = this.getOurSetting(PATH_KEY) == null ? "" : this.getOurSetting(PATH_KEY);
-                
+                debugLog("set our path to: " +this.path); 
                 let ourFlags = this.getOurSetting(FLAGS_KEY);
                 
                 if (ourFlags != null)
@@ -432,8 +432,9 @@ MyApplet.prototype = {
     // only for our instance
     getOurSetting: function(key) 
     {
-		let settingsList = this.getAllSettings(key).split(",");
-		return flagArray[this._pathMonID] == undefined ? null : flagArray[this._pathMonID];
+		  let settingsList = this.getAllSettings(key).split(",");
+      debugLog("getOurSetting: pathMonID="+this._pathMonID+", settingsList="+settingsList);
+		  return settingsList[this._pathMonID] == undefined ? null : settingsList[this._pathMonID];
     },
 
     _cloneApplet: function()
@@ -690,7 +691,7 @@ var FileProvider = NoteProvider.extend({
 		this.showDirectories = (this.showDirectories & flags);
 		this.showSymlinks = (this.showSymlinks & flags);
 		arguments.callee.$.setFlags.call(this, flags);
-	}
+	},
 	
 	type: function() 
 	{ 
