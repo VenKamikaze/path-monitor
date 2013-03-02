@@ -63,7 +63,7 @@ const GSETTINGS_SCHEMA = 'com.servebeer.gamed.' + UUID;
 const FALLBACK_GSETTINGS_PATH = HOME + "/.local/share/cinnamon/applets/" + NAME + "\@kamikaze";
 
 const PATH_KEY = "watchedpath";
-const EXCLUDE_FLAGS_KEY = "excludeflags";
+const FLAGS_KEY = "excludeflags";
 
 // TODO: see if we can find out the font size and screen size and make this dynamic.
 const MAX_LIST_SIZE = 25;
@@ -71,6 +71,9 @@ const MAX_LIST_SIZE = 25;
 // Allow maximum of 5 instances of path-monitor.
 const MAX_INSTANCES = 5; //TODO not used... should we have a max?
 const debug = true;
+
+const keys = ["watchedpath","excludeflags","excludepatterns"];
+// imports.misc.config.PACKAGE_VERSION to check CINNAMON version
 
 //-------------------------------------------------------------------
 function debugLog(text) {
@@ -83,8 +86,8 @@ function errorLog(text) {
 
 //-------------------------------------------------------------------
 
-function MyApplet(orientation, panel_height, workingPath, internalId, instancesToSpawn, master) {
-    this._init(orientation, panel_height, workingPath, internalId, instancesToSpawn, master);
+function MyApplet(orientation, panel_height, workingPath, internalId, instancesToSpawn, isMaster) {
+    this._init(orientation, panel_height, workingPath, internalId, instancesToSpawn, isMaster);
 }
 
 MyApplet.prototype = {
@@ -96,10 +99,12 @@ MyApplet.prototype = {
     _isMasterCopy: false,
     _nextPathMonID: null,
     _pathMonID: null,
-    _childApplets: null,
     _enabled: true,  // set this to false when we exit a child instance
     
-    _init: function(orientation, panel_height, workingPath, internalId, instancesToSpawn, master) {
+    _masterApplet: null,  // keep a ref to the master applet for saving settings
+    _childApplets: null,  // array of child applets.
+    
+    _init: function(orientation, panel_height, workingPath, internalId, instancesToSpawn, isMaster) {
         Applet.IconApplet.prototype._init.call(this, orientation, panel_height);
 
         this._orientation = orientation;
@@ -110,12 +115,13 @@ MyApplet.prototype = {
         {
         	this._pathMonID = internalId;
 			
-        	if (master)
+        	if (isMaster)
 			{
 				debugLog("Set to master instance. pathMonID="+this._pathMonID);
 				this._isMasterCopy = true;
 				this._nextPathMonID = this._pathMonID;
 				this._childApplets = new Array();
+				this._masterApplet = this;
 				
 				// spawn the new instances
 				setTimeout(Lang.bind(this, function () {
@@ -199,13 +205,12 @@ MyApplet.prototype = {
 			this._applet_context_menu.addActor(this._excludeEntry);
 
 			// Only allow spawning new copies from the master instance
-			// to allow us to keep adding/removing child instances clean.
+			// to allow us to keep adding/removing child instances cleanly.
 			if (this.isMasterCopy())
 			{
 				this._applet_context_menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 				this._applet_context_menu.addAction("Monitor an extra path...", 
 					 Lang.bind(this, function() {
-                                this._addToSettings();
                                 this._cloneApplet();
                               }));
             }
@@ -224,13 +229,6 @@ MyApplet.prototype = {
             }
 		}
     },
-
-     _saveAllFlags: function() {
-         let flags = 0;
-         //if(this.fileProvider.showHiddenFiles)
-         // get the flags from the provider instead.
-         
-     },
     
      _onNotesChange: function () {
          this.menu.removeAll();
@@ -314,7 +312,7 @@ MyApplet.prototype = {
     	// Possible race condition here due to above.
     	// Also, if paths are changed on the applets via another method like dconf-editor
     	// then it will not realise this until cinnamon is restarted (applet is re-instantiated).
-    	// TODO fix this
+    	// TODO fix this - values should be bound to the dconf values.
     	debugLog("In on_applet_added_to_panel!");
     	if(this.isMasterCopy())
     	{
@@ -357,94 +355,147 @@ MyApplet.prototype = {
     },
 
     // set a setting for our instance
-    _addToSettings: function ()
+//    _addToSettings: function ()
+//    {
+//        debugLog("addToSettings.");
+//        try
+//        {
+//            // Add a settings space for our new instance.
+//            // TODO make array of keys and loop over.
+//            let allVals = this.getSettingString(PATH_KEY) + ",";
+//            this._settings.set_string(PATH_KEY, allVals);
+//
+//            allVals = this.getSettingString(EXCLUDE_FLAGS_KEY) + ",";
+//            this._settings.set_string(EXCLUDE_FLAGS_KEY, allVals);
+//        }
+//        catch (e)
+//        {
+//            errorLog(e);
+//        }
+//    },
+
+    _removeSettings: function ()
     {
-        debugLog("addToSettings.");
-        try
-        {
-            // Add a settings space for our new instance.
-            // TODO make array of keys and loop over.
-            let allVals = this.getSettingString(PATH_KEY) + ",";
-            this._settings.set_string(PATH_KEY, allVals);
-
-            allVals = this.getSettingString(EXCLUDE_FLAGS_KEY) + ",";
-            this._settings.set_string(EXCLUDE_FLAGS_KEY, allVals);
-        }
-        catch (e)
-        {
-            errorLog(e);
-        }
+    	this.saveAllSettings();
     },
-
-    _removeSettings: function()
-    {
-        debugLog("removeSettings.");
-        try
-        {
-            // TODO put the keys in an array and do a loop here
-            // Handle multi-path
-            let allVals = this.getSettingString(PATH_KEY);
-            let newValue = new String();
-            let allValArray = allVals.split(",");
-            for(let p in allValArray)
-            {
-                newValue += (p != this._pathMonID ? allValArray[p] : "");
-
-                if( (p != allValArray.length -1) && (p+1) != this._pathMonID ) // if the next instance is us, get rid of the comma
-                    newValue += ",";
-            }
-            debugLog("removeSettings. new PATH_KEY value is: "+newValue);
-            this._settings.set_string(PATH_KEY, newValue);
-
-            allVals = this.getSettingString(EXCLUDE_FLAGS_KEY);
-            newValue = new String();
-            allValArray = allVals.split(",");
-            for(let p in allValArray)
-            {
-                newValue += (p != this._pathMonID ? allValArray[p] : "");
-                 
-                if(p != (allValArray.length -1 && p != this._pathMonID) )
-                    newValue += ",";
-            }   
-            this._settings.set_string(EXCLUDE_FLAGS_KEY, allVals);
-        }
-        catch (e)
-        {
-            errorLog(e);
-        }
-    },
+    
+//    _removeSettings: function()
+//    {
+//        debugLog("removeSettings.");
+//        try
+//        {
+//            // TODO put the keys in an array and do a loop here
+//            // Handle multi-path
+//            let allVals = this.getSettingString(PATH_KEY);
+//            let newValue = new String();
+//            let allValArray = allVals.split(",");
+//            for(let p in allValArray)
+//            {
+//                newValue += (p != this._pathMonID ? allValArray[p] : "");
+//
+//                if( (p != allValArray.length -1) && (p+1) != this._pathMonID ) // if the next instance is us, get rid of the comma
+//                    newValue += ",";
+//            }
+//            debugLog("removeSettings. new PATH_KEY value is: "+newValue);
+//            this._settings.set_string(PATH_KEY, newValue);
+//
+//            allVals = this.getSettingString(EXCLUDE_FLAGS_KEY);
+//            newValue = new String();
+//            allValArray = allVals.split(",");
+//            for(let p in allValArray)
+//            {
+//                newValue += (p != this._pathMonID ? allValArray[p] : "");
+//                 
+//                if(p != (allValArray.length -1 && p != this._pathMonID) )
+//                    newValue += ",";
+//            }   
+//            this._settings.set_string(EXCLUDE_FLAGS_KEY, allVals);
+//        }
+//        catch (e)
+//        {
+//            errorLog(e);
+//        }
+//    },
 
     // set a setting for our instance
     setSetting: function (key, value) 
     {
         debugLog("setSetting. key="+key + " value="+value);
-        try
-        {
-            // Handle multi-path
-        	let allVals = this.getSettingString(key);
-        	let newValue = new String();
-        	let allValArray = allVals.split(",");
-            for(let p in allValArray) 
-            {
-            	newValue += (newValue.length > 0 ? "," : "");
-            	if(p == this._pathMonID)
-        	    {
-        		    newValue += value;
-            	}
-                else
-                {
-                    newValue += allValArray[p];
-                }
-            }
-        	debugLog("Storing new setting. allVals="+allVals + " newVals="+newValue);
-        	value = newValue;
-        	this._settings.set_string(key, value);
-        }
-        catch (e)
-        {
-            errorLog(e);
-        }
+		getMaster().saveAllSettings();	
     },
+
+    saveAllSettings: function ()
+    {
+		if (this.isMasterCopy())
+        {
+        	let pathValues = new String();
+        	let flagValues = new String();
+        	let excludeValues = new String();
+        	for (let child in this._childApplets)
+        	{
+        		debugLog("child="+child);
+        		pathValues += (pathValues.length > 0 ? "," : "");
+        		flagValues += (flagValues.length > 0 ? "," : "");
+        		excludeValues += (excludeValues.length > 0 ? "," : "");
+        		
+        		debugLog("saveAllSettings. child._enabled = " + child._enabled);
+        		if(child._enabled)
+        		{
+        			pathValues += child.path;
+        			flagValues += child.provider.getFlags();
+        			excludeValues += child.provider.excludeValues();
+        		}
+        	}
+        	
+        	let allPaths = this.path + "," + pathValues;
+        	let allFlags = this.provider.getFlags() + "," + flagValues;
+        	let allExcludes = this.provider.getExcludeValues() + "," + excludeValues;
+			
+        	try
+			{
+				debugLog("Storing new settings. allPaths="+allPaths);
+				this._settings.set_string(PATH_KEY, allPaths);
+				this._settings.set_string(FLAGS_KEY, allFlags);
+				// this._settings.set_string(EXCLUDE_KEY, allExcludes); M-1 again...
+			}
+			catch (e)
+			{
+				errorLog(e);
+			}
+		}
+    },
+    
+//   // set a setting for our instance
+//   setSetting: function (key, value) 
+//   {
+//       debugLog("setSetting. key="+key + " value="+value);
+//       try
+//       {
+//           // Handle multi-path
+//       	let allVals = this.getSettingString(key);
+//       	let newValue = new String();
+//       	let allValArray = allVals.split(",");
+//           for(let p in allValArray) 
+//           {
+//           	newValue += (newValue.length > 0 ? "," : "");
+//           	if(p == this._pathMonID)
+//       	    {
+//       		    newValue += value;
+//           	}
+//               else
+//               {
+//                   newValue += allValArray[p];
+//               }
+//           }
+//       	debugLog("Storing new setting. allVals="+allVals + " newVals="+newValue);
+//       	value = newValue;
+//       	this._settings.set_string(key, value);
+//       }
+//       catch (e)
+//       {
+//           errorLog(e);
+//       }
+//   },
 
     // for all instances
     getSettingString: function(key) 
@@ -467,7 +518,7 @@ MyApplet.prototype = {
         try
         {
             let flagArray = [];
-            allFlags = this._settings.get_string(EXCLUDE_FLAGS_KEY);
+            allFlags = this._settings.get_string(FLAGS_KEY);
             flagArray = allFlags.split(",");
             return flagArray[this._pathMonID] == undefined ? null : flagArray[this._pathMonID];
         }
@@ -495,7 +546,13 @@ MyApplet.prototype = {
 					  childApplet._panelLocation = ourPanel;
 					  childApplet.showPath();
 					  childApplet.monitorPath(childApplet.path);
+					  childApplet.setMasterInstance(this);
 					}), 50);
+    },
+    
+    setMasterInstance: function(applet)
+    {
+    	this._masterApplet = applet;
     },
     
     isMasterCopy: function()
@@ -633,7 +690,9 @@ var NoteProvider = Class.extend({
     _tempDocFilePattern: ".*\~",
 
     toggleDocTempFiles: function () { this.showDocTempFiles = (! this.showDocTempFiles); this._setupFilter(this.fileExcludeFilter, this.fullRegex); },
-    getEnabledFlags: function () { return this.showDocTempFiles ? this.docTempFlag : 0; },
+    
+    getFlags: function () { return this.showDocTempFiles ? this.docTempFlag : 0; },
+    setFlags: function (flags) { this.showDocTempFiles = (this.showDocTempFiles & flags); },
     
     construct: function() 
 	{
@@ -686,6 +745,8 @@ var NoteProvider = Class.extend({
 		return (!matches);  // poor var/func name - if it matches it DOESN'T pass the exclude filter
  	},
  	
+ 	getExcludeValues: function () { return patternList; },
+ 	
  	open: function (note) { throw 'Not implemented!'; }
 });
 
@@ -707,15 +768,23 @@ var FileProvider = NoteProvider.extend({
     toggleDirectories: function () { this.showDirectories = (! this.showDirectories); },
     toggleSymlinks: function () { this.showSymlinks = (! this.showSymlinks); },
 
-    getEnabledFlags: function () { 
+    getFlags: function () { 
         let flags = 0;
         flags |= this.showHiddenFiles ? this.hiddenFileFlag : 0;
         flags |= this.showDirectories ? this.directoryFlag : 0;
         flags |= this.symlinkFlag ? this.symlinkFlag : 0;
-        flags |= arguments.callee.$.getEnabledFlags.call(this);
+        flags |= arguments.callee.$.getFlags.call(this);
         return flags;
     },
-		
+
+	// recommended that list is called after this.
+	setFlags: function(flags) {
+		this.showHiddenFiles = (this.hiddenFileFlag & flags);
+		this.showDirectories = (this.showDirectories & flags);
+		this.showSymlinks = (this.showSymlinks & flags);
+		arguments.callee.$.setFlags.call(this, flags);
+	}
+	
 	type: function() 
 	{ 
 		return "FileProvider";	
