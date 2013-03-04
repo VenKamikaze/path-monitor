@@ -16,6 +16,7 @@
 //                   * Allow separate filtering per instance of path-monitor
 //                   * Allow the gschema to store these extra variables
 //                   ** Still working on the exclude pattern matching storage.
+//                   * Detect Cinnamon versions >= 1.7 and disable the multi-instance code
 //                   
 // NOTE: Using a comma (,) is NOT supported for the file/path filtering at this time
 //
@@ -75,7 +76,7 @@ const MAX_INSTANCES = 5; //TODO not used... should we have a max?
 const debug = true;
 
 const keys = ["watchedpath","excludeflags","excludepatterns"];
-// imports.misc.config.PACKAGE_VERSION to check CINNAMON version
+const CINNAMON_VER = imports.misc.config.PACKAGE_VERSION;
 
 //-------------------------------------------------------------------
 function debugLog(text) {
@@ -144,12 +145,16 @@ MyApplet.prototype = {
             try
             {
                 this._settings = loadSettings(GSETTINGS_SCHEMA, workingPath);
-                this.path = this.getOurSetting(PATH_KEY) == null ? "" : this.getOurSetting(PATH_KEY);
+                this.path = this.getOurSetting(PATH_KEY, false) == null ? "" : this.getOurSetting(PATH_KEY, false);
                 debugLog("set our path to: " +this.path); 
-                let ourFlags = this.getOurSetting(FLAGS_KEY);
-                
+
+                let ourFlags = this.getOurSetting(FLAGS_KEY, false);
                 if (ourFlags != null)
                 	this.provider.setFlags(ourFlags);
+
+                let ourExcludes = this.getOurSetting(EXCLUDE_KEY, true);
+                if (ourExcludes != null)
+                  this.provider.setExcludeFilter( ourExcludes.replace(getUniqueSeparator(false), "," ));
             }
             catch (e)
             {
@@ -178,18 +183,21 @@ MyApplet.prototype = {
 			this._applet_context_menu.addMenuItem(symlinksSwitch);
 			this._applet_context_menu.addMenuItem(docTempSwitch);
 			
-			hiddenFilesSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleHidden(); this._onNotesChange(); } ));
-			directoriesSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleDirectories(); this._onNotesChange(); } ));
-			symlinksSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleSymlinks(); this._onNotesChange(); } ));
-			docTempSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleDocTempFiles(); this._onNotesChange(); } ));
+			hiddenFilesSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleHidden(); this._onNotesChange(true); } ));
+			directoriesSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleDirectories(); this._onNotesChange(true); } ));
+			symlinksSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleSymlinks(); this._onNotesChange(true); } ));
+			docTempSwitch.connect('toggled', Lang.bind(this, function () { this.provider.toggleDocTempFiles(); this._onNotesChange(true); } ));
 
-            this._applet_context_menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+      this._applet_context_menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
 			this._excludeEntry = new St.Entry({name: 'excludeFilter',
 										can_focus: true,
 										track_hover: false,
 										hint_text: _("Enter exclude file pattern")});
 			this._excludeEntry.lastPattern = "";
+
+      if(this.provider.getExcludeValues().length > 0)
+        this._excludeEntry.text = this.provider.getExcludeValues().join();
 			
 			this._excludeEntry.connect('key-release-event', Lang.bind(this, function(entry, event) 
 			{
@@ -197,7 +205,7 @@ MyApplet.prototype = {
 				if (key == Clutter.KEY_Return) 
 				{
 					this.provider.setExcludeFilter(this._excludeEntry.text);
-					this._onNotesChange();
+					this._onNotesChange(true);
 					
 					return true;
 				}
@@ -237,17 +245,18 @@ MyApplet.prototype = {
 		}
     },
     
-     _onNotesChange: function () {
+     _onNotesChange: function (save) {
        this.menu.removeAll();
      	 this._updateMenu(this.provider.list(this.notes_directory));
        this._excludeEntry.lastPattern = this._excludeEntry.text;
-       this.saveAllSettings();
+       if (save != undefined && save)
+         this.saveAllSettings();
      },
      
      _updateMenu: function (fileList) {
      	 for(let i = 0; i < fileList.length; i++)
      	 {
-             let filePath = this.path + '/' + fileList[i];
+         let filePath = this.path + '/' + fileList[i];
      	 	 this.menu.addAction(fileList[i], Lang.bind(this, function() {
      	 	                                      this.provider.open(filePath); }));
      	 }
@@ -256,8 +265,8 @@ MyApplet.prototype = {
      _setAndMonitorPath: function (path) {
      	 debugLog("Setting and monitoring new path=" + path);
      	 this.setPath(path);
-         this.monitorPath(path);
-         this.setSetting(PATH_KEY, path);
+       this.monitorPath(path);
+       this.setSetting(PATH_KEY, path);
      },
 
      setPath: function (path) {
@@ -305,8 +314,8 @@ MyApplet.prototype = {
         this.notes_directory = Gio.file_new_for_path(path);
 
         this.monitor = this.notes_directory.monitor_directory(0, null, null);
-        this.monitor.connect('changed', Lang.bind(this, this._onNotesChange));
-        this._onNotesChange();
+        this.monitor.connect('changed', Lang.bind(this, function() { this._onNotesChange(true); } ));
+        this._onNotesChange(false);
 
         this._entry.text = path;
     },
@@ -396,20 +405,21 @@ MyApplet.prototype = {
         	{
         	  pathValues += "," + child.path;
         		flagValues += "," + child.provider.getFlags();
-        		excludeValues += "," + child.provider.getExcludeValues().join();
+        		excludeValues += getUniqueSeparator(true) + child.provider.getExcludeValues().join(getUniqueSeparator(false));
+            //                                    ||| + pattern1 + ,,, + pattern2 + ,,, + pattern3 etc
         	}
         }
 
         let allPaths = this.path + pathValues;
         let allFlags = this.provider.getFlags() + flagValues;
-        let allExcludes = this.provider.getExcludeValues().join() + excludeValues;
+        let allExcludes = this.provider.getExcludeValues().join(getUniqueSeparator(false)) + excludeValues;
 
         try
 			  {
 				  debugLog("Storing new settings. allPaths="+allPaths + "|allFlags="+allFlags);
 				  this._settings.set_string(PATH_KEY, allPaths);
 				  this._settings.set_string(FLAGS_KEY, allFlags);
-				  // this._settings.set_string(EXCLUDE_KEY, allExcludes); M-1 again...
+				  this._settings.set_string(EXCLUDE_KEY, allExcludes); 
 			  }
 			  catch (e)
 			  {
@@ -433,9 +443,11 @@ MyApplet.prototype = {
     },
 
     // only for our instance
-    getOurSetting: function(key) 
+    getOurSetting: function(key, isUniqueSeparator) 
     {
-		  let settingsList = this.getAllSettings(key).split(",");
+      let seperator = isUniqueSeparator ? getUniqueSeparator(true) : ",";
+
+		  let settingsList = this.getAllSettings(key).split(seperator);
       debugLog("getOurSetting: pathMonID="+this._pathMonID+", settingsList="+settingsList);
 		  return settingsList[this._pathMonID] == undefined ? null : settingsList[this._pathMonID];
     },
@@ -487,14 +499,29 @@ MyApplet.prototype = {
 //-------------------------------------------------------------------
 
 function main(metadata, orientation, panel_height) {
-    let gsettings = loadSettings(GSETTINGS_SCHEMA, metadata.path);
-    let allPaths = new String(gsettings.get_string(PATH_KEY));
+  let gsettings = loadSettings(GSETTINGS_SCHEMA, metadata.path);
+  let allPaths = new String(gsettings.get_string(PATH_KEY));
    
 	let myApplet = new MyApplet(orientation, panel_height, metadata.path, 0, (allPaths.split(",").length -1), true);
 	myApplet.showPath();
 	myApplet.monitorPath(myApplet.path);
 	
-    return myApplet;
+  return myApplet;
+}
+
+function getCinnamonVersion() {
+  let result = new RegExp('^([0-9]+)\.([0-9]+)', 'g').exec(CINNAMON_VER);
+  let major = result[1];
+  let minor = (result[2] == undefined ? 0 : result[2]);
+  return new Number( (new String(major) + new String(minor)) );
+}
+
+// we allow multiple exclude patterns to be specified
+// we need to tie these to a single instance
+// For unique seperator within an instance, use ",,,"
+// For unique seperator per instance use "|||"
+function getUniqueSeparator(instanceSep) {
+  return instanceSep ? "|||" : ",,,";
 }
 
 //convenience
@@ -616,28 +643,25 @@ var NoteProvider = Class.extend({
 	_setupFilter: function(pattern, isRegex)
 	{
 		// fix up the pattern filter to be regex compliant for searching
-	    if( ! isRegex)
-	    {
-	      this.patterns = pattern.replace(new RegExp("\\.", "g"), "\\.");
-	      this.patterns = this.patterns.replace(new RegExp("\\*", "g"), ".*");
-	    }
-	    else
-	      this.patterns = pattern;
+	  if( ! isRegex)
+	  {
+	    this.patterns = pattern.replace(new RegExp("\\.", "g"), "\\.");
+	    this.patterns = this.patterns.replace(new RegExp("\\*", "g"), ".*");
+	  }
+	  else
+	    this.patterns = pattern;
 
-        if ( ! this.showDocTempFiles) // don't show them/setup the regexp to exclude them
-          this.patterns += (this.patterns.length > 0) ? ("," + this._tempDocFilePattern) : this._tempDocFilePattern;
-	    
 		debugLog("setupFilter: patterns=" + this.patterns);
 
-	    if (this.patterns.length > 0)
-	      this.patternList = this.patterns.split(","); // TODO: instead of looping over an array, make this a single regexp
-        else
-          this.patternList = [];
+	  if (this.patterns.length > 0)
+	    this.patternList = this.patterns.split(","); // TODO: instead of looping over an array, make this a single regexp
+    else
+      this.patternList = [];
 	},
 	
-	setExcludeFilter: function (newFilter, isRegex)
+	setExcludeFilter: function (newFilter)
 	{
-		this._setupFilter(newFilter, isRegex);
+		this._setupFilter(newFilter, this.fullRegex);
 	},
 	
 	type: function() { return "NoteProvider"; },
@@ -655,6 +679,10 @@ var NoteProvider = Class.extend({
 				matches |= new RegExp(pattern, 'gi').test(noteName); // match on it...
 			}
 		}
+
+    if ( ! this.showDocTempFiles)
+      matches |= new RegExp( this._tempDocFilePattern, 'g').test(noteName);
+
 		return (!matches);  // poor var/func name - if it matches it DOESN'T pass the exclude filter
  	},
  	
@@ -685,7 +713,7 @@ var FileProvider = NoteProvider.extend({
       let flags = 0;
       flags |= this.showHiddenFiles ? this.hiddenFileFlag : 0;
       flags |= this.showDirectories ? this.directoryFlag : 0;
-      flags |= this.symlinkFlag ? this.symlinkFlag : 0;
+      flags |= this.showSymlinks ? this.symlinkFlag : 0;
       flags |= arguments.callee.$.getFlags.call(this);
       debugLog("getFlags, flags="+flags);
       return flags;
